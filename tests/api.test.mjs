@@ -1,0 +1,22 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {once} from 'node:events';import {createApp} from '../src/server.mjs';import {ProductStore} from '../src/store.mjs';
+test('store validates create / update / delete rules',()=>{const s=new ProductStore();assert.equal(s.list().length,3);assert.ok(s.create({title:'',price:3,category:'cable'}).error);const item=s.create({title:' Test ',price:10,category:'cable'}).item;assert.equal(item.title,'Test');assert.equal(s.update(item.id,{price:20},true).item.price,20);assert.equal(s.update(item.id,{price:30},false).error.includes('لازم'),true);assert.equal(s.delete(item.id),true);assert.equal(s.delete(item.id),false);assert.equal(s.reset().length,3)});
+test('HTTP methods, statuses, headers, errors and reset work',async()=>{const server=createApp();server.listen(0,'127.0.0.1');await once(server,'listening');const port=server.address().port;const base=`http://127.0.0.1:${port}`;const req=(path,opts={})=>fetch(base+path,opts);const jsonBody=obj=>({headers:{'content-type':'application/json'},body:JSON.stringify(obj)});try{
+let r=await req('/api/health');assert.equal(r.status,200);assert.equal((await r.json()).status,'ok');
+r=await req('/api/products');assert.equal(r.status,200);assert.equal((await r.json()).count,3);
+r=await req('/api/products/1');assert.equal((await r.json()).id,1);
+r=await req('/api/products/999');assert.equal(r.status,404);
+r=await req('/api/products/NaN');assert.equal(r.status,400);
+r=await req('/api/products',{method:'POST',...jsonBody({title:'Demo',price:500,category:'cable'})});assert.equal(r.status,201);assert.equal(r.headers.get('location'),'/api/products/4');assert.equal((await r.json()).id,4);
+r=await req('/api/products/4',{method:'PUT',...jsonBody({title:'Replace',price:600,category:'charger'})});assert.equal(r.status,200);assert.equal((await r.json()).title,'Replace');
+r=await req('/api/products/4',{method:'PATCH',...jsonBody({price:700})});assert.equal(r.status,200);assert.equal((await r.json()).price,700);
+r=await req('/api/products/4',{method:'PUT',...jsonBody({price:700})});assert.equal(r.status,400);
+r=await req('/api/products',{method:'POST',...jsonBody({title:'bad',price:-2,category:'charger'})});assert.equal(r.status,400);
+r=await req('/api/products',{method:'POST',headers:{'Content-Type':'text/plain'},body:'a'});assert.equal(r.status,415);
+r=await req('/api/products',{method:'DELETE'});assert.equal(r.status,405);assert.match(r.headers.get('allow'),/POST/);
+r=await req('/api/demo-error');assert.equal(r.status,500);
+r=await req('/api/none');assert.equal(r.status,404);
+r=await req('/api/products/4',{method:'DELETE'});assert.equal(r.status,204);assert.equal(await r.text(),'');
+r=await req('/api/products/4');assert.equal(r.status,404);
+r=await req('/api/reset',{method:'POST'});assert.equal(r.status,200);assert.equal((await r.json()).items.length,3);
+r=await req('/');assert.equal(r.status,200);assert.match(await r.text(),/آزمایشگاه HTTP/);
+}finally{await new Promise((resolve,reject)=>server.close(err=>err?reject(err):resolve()))}});
